@@ -7,10 +7,11 @@ import couponModel from "../../../DB/models/coupon.model.js";
 import productModel from "../../../DB/models/product.model.js";
 import cartModel from "../../../DB/models/cart.model.js";
 import { sendEmail } from "../../service/sendEmail.js";
+import { payment } from "../../utils/payment.js";
 
 // add order
 
-export const createOreder = asyncHandler(async (req, res, next) => {
+export const createOreder = async (req, res, next) => {
   const { productId, quantity, couponCode, address, phone, paymentMethod } =
     req.body;
 
@@ -50,7 +51,7 @@ export const createOreder = asyncHandler(async (req, res, next) => {
       return next(new appError("product not found", 281));
     }
     if (flag) {
-      product = product.toObject();
+      product == product.toObject();
     }
 
     product.title = checkProduct.title;
@@ -91,39 +92,75 @@ export const createOreder = asyncHandler(async (req, res, next) => {
     await cartModel.updateOne({ user: req.user._id }, { products: [] });
   }
 
-  const invoice = {
-    shipping: {
-      name: req.user.name,
-      address: req.user.address,
-      city: "Damietta",
-      state: "Egypt",
-      country: "Egypt",
-      postal_code: 94111,
-    },
-    items: order.products,
-    subtotal: subPrice,
-    paid: order.totalPrice,
-    invoice_nr: order._id,
-    date: order.createdAt,
-    coupon: req.body?.coupon?.amount || 0,
-  };
+  // const invoice = {
+  //   shipping: {
+  //     name: req.user.name,
+  //     address: req.user.address,
+  //     city: "Damietta",
+  //     state: "Egypt",
+  //     country: "Egypt",
+  //     postal_code: 94111,
+  //   },
+  //   items: order.products,
+  //   subtotal: subPrice,
+  //   paid: order.totalPrice,
+  //   invoice_nr: order._id,
+  //   date: order.createdAt,
+  //   coupon: req.body?.coupon?.amount || 0,
+  // };
 
-  await createInvoice(invoice, "invoice.pdf");
+  // await createInvoice(invoice, "invoice.pdf");
 
-  await sendEmail(req.user.email, "order placed", "your order", [
-    {
-      path: "invoice.pdf",
-      contentType: "application/pdf",
-    },
-  ]);
+  // await sendEmail(req.user.email, "order placed", "your order", [
+  //   {
+  //     path: "invoice.pdf",
+  //     contentType: "application/pdf",
+  //   },
+  // ]);
 
-  req.data = {
-    model: orderModel,
-    id: order._id,
-  };
+  // req.data = {
+  //   model: orderModel,
+  //   id: order._id,
+  // };
+
+  if (paymentMethod == "card") {
+    const stripe = new Stripe(process.env.stripe);
+
+    if (req.body?.coupon) {
+      const coupon = await stripe.coupons.create({
+        percent_off: req.body.coupon.amount,
+        duration: "once",
+      });
+      req.body.couponId = coupon.id;
+    }
+    const session = await payment({
+      payment_method_types: ["card"],
+      mode: "payment",
+      customer_email: req.user.email,
+      metadata: {
+        orderId: order._id.toString(),
+      },
+      success_url: `${req.protocol}://${req.headers.host}/order/success/${order._id}`,
+      cancel_url: `${req.protocol}://${req.headers.host}/order/canceled/${order._id}`,
+      line_items: order.products.map((product) => {
+        return {
+          price_data: {
+            currency: "egp",
+            product_data: {
+              name: product.title,
+            },
+            unit_amount: product.price * 100,
+          },
+          quantity: product.quantity,
+        };
+      }),
+      discounts: req.body?.coupon ? [{ coupon: req.body.couponId }] : [],
+    });
+    return res.json({ msg: "done", url: session.url, session });
+  }
 
   res.status(282).json({ msg: "done", order });
-});
+};
 
 // cancle order
 

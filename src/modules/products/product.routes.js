@@ -15,7 +15,7 @@ productRouter.use("/:productId/review", reviewRouter);
 productRouter.use("/:productId/wishlist", wishListRouter);
 
 productRouter.post(
-  "/:id",
+  "/",
   multerHost(validExtensions.image).fields([
     { name: "image", maxCount: 1 },
     { name: "coverImages", maxCount: 2 },
